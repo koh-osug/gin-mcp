@@ -54,9 +54,10 @@ type MCPMessage struct {
 
 // Tool represents a function or capability exposed by the server
 type Tool struct {
-	Name        string      `json:"name"`                  // Unique identifier for the tool
-	Description string      `json:"description,omitempty"` // Human-readable description
-	InputSchema *JSONSchema `json:"inputSchema"`           // Schema for the tool's input parameters
+	Name         string      `json:"name"`                  // Unique identifier for the tool
+	Description  string      `json:"description,omitempty"` // Human-readable description
+	InputSchema  *JSONSchema `json:"inputSchema"`           // Schema for the tool's input parameters
+	OutputSchema *JSONSchema `json:"outputSchema"`          // Schema for the tool's output parameters
 	// Add other fields as needed by the MCP spec (e.g., outputSchema)
 }
 
@@ -68,18 +69,20 @@ type Operation struct {
 
 // RegisteredSchemaInfo holds Go types associated with a specific route for schema generation
 type RegisteredSchemaInfo struct {
-	QueryType interface{} // Go struct or pointer to struct for query parameters (or nil)
-	BodyType  interface{} // Go struct or pointer to struct for request body (or nil)
+	QueryType    interface{} // Go struct or pointer to struct for query parameters (or nil)
+	BodyType     interface{} // Go struct or pointer to struct for request body (or nil)
+	ResponseType interface{} // Go struct or pointer to struct for response body (or nil)
 }
 
 // JSONSchema represents a basic JSON Schema structure.
 // This needs to be expanded based on actual schema generation needs.
 type JSONSchema struct {
-	Type        string                 `json:"type"`
-	Description string                 `json:"description,omitempty"`
-	Properties  map[string]*JSONSchema `json:"properties,omitempty"`
-	Required    []string               `json:"required,omitempty"`
-	Items       *JSONSchema            `json:"items,omitempty"` // For array type
+	Type                 string                 `json:"type"`
+	Description          string                 `json:"description,omitempty"`
+	Properties           map[string]*JSONSchema `json:"properties,omitempty"`
+	Required             []string               `json:"required,omitempty"`
+	Items                *JSONSchema            `json:"items,omitempty"` // For array type
+	AdditionalProperties *JSONSchema            `json:"additionalProperties,omitempty"`
 	// Add other JSON Schema fields as needed (e.g., format, enum, etc.)
 }
 

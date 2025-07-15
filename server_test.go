@@ -214,7 +214,7 @@ func TestHandleInitialize(t *testing.T) {
 		Params:  map[string]interface{}{"clientInfo": "testClient"},
 	}
 
-	resp := mcp.handleInitialize(req)
+	resp := mcp.handleInitialize(req, nil)
 	assert.NotNil(t, resp)
 	assert.Equal(t, req.ID, resp.ID)
 	assert.Nil(t, resp.Error)
@@ -238,7 +238,7 @@ func TestHandleInitialize_InvalidParams(t *testing.T) {
 		Params:  "not a map", // Invalid parameter type
 	}
 
-	resp := mcp.handleInitialize(req)
+	resp := mcp.handleInitialize(req, nil)
 	assert.NotNil(t, resp)
 	assert.Equal(t, req.ID, resp.ID)
 	assert.Nil(t, resp.Result)
@@ -263,7 +263,11 @@ func TestHandleToolsList(t *testing.T) {
 		Method:  "tools/list",
 	}
 
-	resp := mcp.handleToolsList(req)
+	resp := mcp.handleToolsList(req, nil)
+	assert.NotNil(t, resp)
+	assert.Equal(t, req.ID, resp.ID)
+	assert.Nil(t, resp.Error)
+	assert.NotNil(t, resp.Result)
 	assert.NotNil(t, resp)
 	assert.Equal(t, req.ID, resp.ID)
 	assert.Nil(t, resp.Error)
@@ -319,8 +323,8 @@ func TestRegisterSchema(t *testing.T) {
 	}
 
 	// Test valid registration
-	mcp.RegisterSchema("GET", "/items", QueryParams{}, nil)
-	mcp.RegisterSchema("POST", "/items", nil, Body{})
+	mcp.RegisterSchema("GET", "/items", QueryParams{}, nil, nil)
+	mcp.RegisterSchema("POST", "/items", nil, Body{}, nil)
 
 	keyGet := "GET /items"
 	keyPost := "POST /items"
@@ -336,7 +340,7 @@ func TestRegisterSchema(t *testing.T) {
 	assert.Equal(t, reflect.TypeOf(Body{}), reflect.TypeOf(mcp.registeredSchemas[keyPost].BodyType))
 
 	// Test registration with pointer types
-	mcp.RegisterSchema("PUT", "/items/:id", &QueryParams{}, &Body{})
+	mcp.RegisterSchema("PUT", "/items/:id", &QueryParams{}, &Body{}, nil)
 	keyPut := "PUT /items/:id"
 	assert.Contains(t, mcp.registeredSchemas, keyPut)
 	assert.NotNil(t, mcp.registeredSchemas[keyPut].QueryType)
@@ -345,7 +349,7 @@ func TestRegisterSchema(t *testing.T) {
 	assert.Equal(t, reflect.TypeOf(&Body{}), reflect.TypeOf(mcp.registeredSchemas[keyPut].BodyType))
 
 	// Test overriding registration (should just update)
-	mcp.RegisterSchema("GET", "/items", nil, Body{}) // Override GET /items
+	mcp.RegisterSchema("GET", "/items", nil, Body{}, nil) // Override GET /items
 	assert.Contains(t, mcp.registeredSchemas, keyGet)
 	assert.Nil(t, mcp.registeredSchemas[keyGet].QueryType)   // Should be nil now
 	assert.NotNil(t, mcp.registeredSchemas[keyGet].BodyType) // Should have body now
@@ -399,7 +403,7 @@ func TestHandleToolCall(t *testing.T) {
 
 	// ** Test valid tool call **
 	// Assign mock ONLY for this case
-	mcp.executeToolFunc = func(operationID string, parameters map[string]interface{}) (interface{}, error) {
+	mcp.executeToolFunc = func(operationID string, parameters map[string]interface{}, ctx *gin.Context) (interface{}, error) {
 		assert.Equal(t, dummyTool.Name, operationID) // operationID is the tool name here
 		assert.Equal(t, "value1", parameters["param1"])
 		return map[string]interface{}{"result": "success"}, nil // Return nil error for success
@@ -417,7 +421,7 @@ func TestHandleToolCall(t *testing.T) {
 		},
 	}
 
-	resp := mcp.handleToolCall(callReq)
+	resp := mcp.handleToolCall(callReq, nil)
 	assert.NotNil(t, resp)
 	assert.Nil(t, resp.Error, "Expected no error for valid call")
 	assert.Equal(t, callReq.ID, resp.ID)
@@ -452,7 +456,7 @@ func TestHandleToolCall(t *testing.T) {
 		Method:  "tools/call",
 		Params:  map[string]interface{}{"name": "nonexistent", "arguments": map[string]interface{}{}},
 	}
-	respNotFound := mcp.handleToolCall(callNotFound)
+	respNotFound := mcp.handleToolCall(callNotFound, nil)
 	assert.NotNil(t, respNotFound)
 	assert.NotNil(t, respNotFound.Error)
 	assert.Nil(t, respNotFound.Result)
@@ -469,7 +473,7 @@ func TestHandleToolCall(t *testing.T) {
 		Method:  "tools/call",
 		Params:  "not a map",
 	}
-	respInvalidParams := mcp.handleToolCall(callInvalidParams)
+	respInvalidParams := mcp.handleToolCall(callInvalidParams, nil)
 	assert.NotNil(t, respInvalidParams)
 	assert.NotNil(t, respInvalidParams.Error)
 	assert.Nil(t, respInvalidParams.Result)
@@ -486,7 +490,7 @@ func TestHandleToolCall(t *testing.T) {
 		Method:  "tools/call",
 		Params:  map[string]interface{}{"name": dummyTool.Name}, // Missing 'arguments'
 	}
-	respMissingArgs := mcp.handleToolCall(callMissingArgs)
+	respMissingArgs := mcp.handleToolCall(callMissingArgs, nil)
 	assert.NotNil(t, respMissingArgs)
 	assert.NotNil(t, respMissingArgs.Error)
 	assert.Nil(t, respMissingArgs.Result)
@@ -497,7 +501,7 @@ func TestHandleToolCall(t *testing.T) {
 
 	// ** Test executeTool error **
 	// Assign specific error mock ONLY for this case
-	mcp.executeToolFunc = func(operationID string, parameters map[string]interface{}) (interface{}, error) {
+	mcp.executeToolFunc = func(operationID string, parameters map[string]interface{}, ctx *gin.Context) (interface{}, error) {
 		assert.Equal(t, dummyTool.Name, operationID) // Still check the name if desired
 		return nil, fmt.Errorf("mock execution error")
 	}
@@ -507,7 +511,7 @@ func TestHandleToolCall(t *testing.T) {
 		Method:  "tools/call",
 		Params:  map[string]interface{}{"name": dummyTool.Name, "arguments": map[string]interface{}{"param1": "value1"}},
 	}
-	respExecError := mcp.handleToolCall(callExecError)
+	respExecError := mcp.handleToolCall(callExecError, nil)
 	assert.NotNil(t, respExecError)
 	assert.NotNil(t, respExecError.Error)
 	assert.Nil(t, respExecError.Result)

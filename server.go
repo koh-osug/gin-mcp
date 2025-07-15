@@ -41,7 +41,7 @@ type GinMCP struct {
 	schemasMu         sync.RWMutex
 	// executeToolFunc holds the function used to execute a tool.
 	// It defaults to defaultExecuteTool but can be overridden for testing.
-	executeToolFunc func(operationID string, parameters map[string]interface{}) (interface{}, error)
+	executeToolFunc func(operationID string, parameters map[string]interface{}, ctx *gin.Context) (interface{}, error)
 }
 
 // Config represents the configuration options for GinMCP
@@ -91,9 +91,9 @@ func New(engine *gin.Engine, config *Config) *GinMCP {
 }
 
 // RegisterSchema associates Go struct types with a specific route for automatic schema generation.
-// Provide nil if a type (Query or Body) is not applicable for the route.
-// Example: mcp.RegisterSchema("POST", "/items", nil, main.Item{})
-func (m *GinMCP) RegisterSchema(method string, path string, queryType interface{}, bodyType interface{}) {
+// Provide nil if a type (Query or Body or Response) is not applicable for the route.
+// Example: mcp.RegisterSchema("POST", "/items", nil, main.Item{}, nil)
+func (m *GinMCP) RegisterSchema(method string, path string, queryType interface{}, bodyType interface{}, responseType interface{}) {
 	m.schemasMu.Lock()
 	defer m.schemasMu.Unlock()
 
@@ -124,10 +124,17 @@ func (m *GinMCP) RegisterSchema(method string, path string, queryType interface{
 			}
 		}
 	}
+	if responseType != nil {
+		responseVal := reflect.ValueOf(responseType)
+		if responseVal.Kind() == reflect.Ptr {
+			responseVal = responseVal.Elem()
+		}
+	}
 
 	m.registeredSchemas[schemaKey] = types.RegisteredSchemaInfo{
-		QueryType: queryType,
-		BodyType:  bodyType,
+		QueryType:    queryType,
+		BodyType:     bodyType,
+		ResponseType: responseType,
 	}
 	if isDebugMode() {
 		log.Printf("Registered schema types for route: %s", schemaKey)
@@ -230,7 +237,7 @@ func (m *GinMCP) handleMCPConnection(c *gin.Context) {
 }
 
 // handleInitialize handles the initialize request from clients
-func (m *GinMCP) handleInitialize(msg *types.MCPMessage) *types.MCPMessage {
+func (m *GinMCP) handleInitialize(msg *types.MCPMessage, c *gin.Context) *types.MCPMessage {
 	// Parse initialization parameters
 	params, ok := msg.Params.(map[string]interface{})
 	if !ok {
@@ -285,7 +292,7 @@ func (m *GinMCP) handleInitialize(msg *types.MCPMessage) *types.MCPMessage {
 }
 
 // handleToolsList handles the tools/list request
-func (m *GinMCP) handleToolsList(msg *types.MCPMessage) *types.MCPMessage {
+func (m *GinMCP) handleToolsList(msg *types.MCPMessage, c *gin.Context) *types.MCPMessage {
 	// Ensure server is ready
 	if err := m.SetupServer(); err != nil {
 		return &types.MCPMessage{
@@ -313,7 +320,7 @@ func (m *GinMCP) handleToolsList(msg *types.MCPMessage) *types.MCPMessage {
 }
 
 // handleToolCall handles the tools/call request
-func (m *GinMCP) handleToolCall(msg *types.MCPMessage) *types.MCPMessage {
+func (m *GinMCP) handleToolCall(msg *types.MCPMessage, c *gin.Context) *types.MCPMessage {
 	// Parse parameters from the incoming MCP message
 	reqParams, ok := msg.Params.(map[string]interface{})
 	if !ok {
@@ -326,11 +333,11 @@ func (m *GinMCP) handleToolCall(msg *types.MCPMessage) *types.MCPMessage {
 	// Get tool name and arguments from the params
 	toolName, nameOk := reqParams["name"].(string)
 	// The actual arguments passed by the LLM are nested under "arguments"
-	toolArgs, argsOk := reqParams["arguments"].(map[string]interface{})
-	if !nameOk || !argsOk {
+	toolArgs, _ := reqParams["arguments"].(map[string]interface{})
+	if !nameOk {
 		return &types.MCPMessage{
 			Jsonrpc: "2.0", ID: msg.ID,
-			Error: map[string]interface{}{"code": -32602, "message": "Missing tool name or arguments"},
+			Error: map[string]interface{}{"code": -32602, "message": "Missing tool name"},
 		}
 	}
 
@@ -354,7 +361,7 @@ func (m *GinMCP) handleToolCall(msg *types.MCPMessage) *types.MCPMessage {
 	}
 
 	// Execute the actual Gin endpoint via internal HTTP call
-	execResult, err := m.executeToolFunc(toolName, toolArgs) // Use the function field
+	execResult, err := m.executeToolFunc(toolName, toolArgs, c) // Use the function field
 	if err != nil {
 		// Handle execution error
 		return &types.MCPMessage{
@@ -496,7 +503,7 @@ func (m *GinMCP) filterTools() {
 
 // defaultExecuteTool is the default implementation for executing a tool.
 // It handles the actual invocation of the underlying Gin handler.
-func (m *GinMCP) defaultExecuteTool(operationID string, parameters map[string]interface{}) (interface{}, error) {
+func (m *GinMCP) defaultExecuteTool(operationID string, parameters map[string]interface{}, c *gin.Context) (interface{}, error) {
 	if isDebugMode() {
 		log.Printf("[Tool Execution] Starting execution of tool '%s' with parameters: %+v", operationID, parameters)
 	}
@@ -601,6 +608,9 @@ func (m *GinMCP) defaultExecuteTool(operationID string, parameters map[string]in
 	}
 
 	req.Header.Set("Accept", "application/json")
+	if c != nil && c.Request.Header.Get("Token") != "" {
+		req.Header.Set("Token", c.Request.Header.Get("Token"))
+	}
 	if reqBody != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

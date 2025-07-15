@@ -35,12 +35,14 @@ func ConvertRoutesToTools(routes gin.RoutesInfo, registeredSchemas map[string]ty
 
 		// Generate schema for the tool's input
 		inputSchema := generateInputSchema(route, registeredSchemas)
+		outputSchema := generateOutputSchema(route, registeredSchemas)
 
 		// Create the tool definition
 		tool := types.Tool{
-			Name:        operationID,
-			Description: fmt.Sprintf("Handler for %s %s", route.Method, route.Path), // Use route info for description
-			InputSchema: inputSchema,
+			Name:         operationID,
+			Description:  fmt.Sprintf("Handler for %s %s", route.Method, route.Path), // Use route info for description
+			InputSchema:  inputSchema,
+			OutputSchema: outputSchema,
 		}
 
 		ttools = append(ttools, tool)
@@ -116,21 +118,139 @@ func generateInputSchema(route gin.RouteInfo, registeredSchemas map[string]types
 	return schema
 }
 
+// generateOutputSchema creates the JSON schema for the tool's output parameters.
+// This is a simplified version using basic reflection and not an external library.
+func generateOutputSchema(route gin.RouteInfo, registeredSchemas map[string]types.RegisteredSchemaInfo) *types.JSONSchema {
+	// Base schema structure
+	schema := &types.JSONSchema{
+		Type:       "object",
+		Properties: make(map[string]*types.JSONSchema),
+		Required:   make([]string, 0),
+	}
+	properties := schema.Properties
+	required := schema.Required
+	array := false
+
+	// 1. Extract Path Parameters
+	matches := PathParamRegex.FindAllStringSubmatch(route.Path, -1)
+	for _, match := range matches {
+		if len(match) > 1 {
+			paramName := match[1]
+			properties[paramName] = &types.JSONSchema{
+				Type:        "string",
+				Description: fmt.Sprintf("Path parameter: %s", paramName),
+			}
+			required = append(required, paramName) // Path params are always required
+		}
+	}
+
+	schemaKey := route.Method + " " + route.Path
+	if schemaInfo, exists := registeredSchemas[schemaKey]; exists {
+		if isDebugMode() {
+			log.Printf("Using registered schema for %s", schemaKey)
+		}
+
+		if schemaInfo.ResponseType != nil {
+			reflectAndAddProperties(schemaInfo.ResponseType, properties, &required, "response")
+
+			if reflect.TypeOf(schemaInfo.ResponseType).Kind() == reflect.Slice || reflect.TypeOf(schemaInfo.ResponseType).Kind() == reflect.Array {
+				array = true
+			}
+		}
+	}
+
+	// Update the required slice in the main schema
+	schema.Required = required
+
+	// If no properties were added (beyond path params), handle appropriately.
+	// Depending on the spec, an empty properties object might be required.
+	// if len(properties) == 0 { // Keep properties map even if empty
+	// 	// Return schema with empty properties
+	// 	return schema
+	// }
+
+	if array {
+		// Base schema structure
+		arraySchema := &types.JSONSchema{
+			Type:  "array",
+			Items: schema,
+		}
+		schema = arraySchema
+	}
+
+	return schema
+}
+
 // reflectAndAddProperties uses basic reflection to add properties to the schema.
 func reflectAndAddProperties(goType interface{}, properties map[string]*types.JSONSchema, required *[]string, source string) {
-	if goType == nil {
-		return // Handle nil input gracefully
-	}
-	t := types.ReflectType(reflect.TypeOf(goType)) // Use helper from types pkg
-	if t == nil || t.Kind() != reflect.Struct {
+	reflectAndAddPropertiesWithDepth(goType, properties, required, source, 0, make(map[reflect.Type]bool))
+}
+
+// reflectAndAddPropertiesWithDepth handles recursive reflection with cycle detection
+func reflectAndAddPropertiesWithDepth(goType interface{}, properties map[string]*types.JSONSchema, required *[]string, source string, depth int, visited map[reflect.Type]bool) {
+	// Prevent infinite recursion
+	const maxDepth = 10
+	if depth > maxDepth {
 		if isDebugMode() {
-			log.Printf("Skipping schema generation for non-struct type: %v (%s)", reflect.TypeOf(goType), source)
+			log.Printf("Max recursion depth reached for type: %v (%s)", reflect.TypeOf(goType), source)
 		}
 		return
 	}
 
+	if goType == nil {
+		return // Handle nil input gracefully
+	}
+
+	originalType := reflect.TypeOf(goType)
+	t := types.ReflectType(originalType) // Use helper from types pkg
+	if t == nil || t.Kind() != reflect.Struct {
+		if isDebugMode() {
+			log.Printf("Skipping schema generation for non-struct type: %v (%s)", originalType, source)
+		}
+		return
+	}
+
+	// Check for circular references
+	if visited[originalType] {
+		if isDebugMode() {
+			log.Printf("Circular reference detected for type: %v (%s)", originalType, source)
+		}
+		return
+	}
+	visited[originalType] = true
+	defer delete(visited, originalType) // Clean up after processing
+
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
+
+		// Handle anonymous (embedded) struct fields by flattening them
+		if field.Anonymous && field.Type.Kind() == reflect.Struct {
+			if isDebugMode() {
+				log.Printf("Flattening embedded struct field: %s", field.Type.Name())
+			}
+			// Create a zero value instance of the embedded struct for reflection
+			embeddedStructValue := reflect.New(field.Type).Elem()
+			embeddedStructInterface := embeddedStructValue.Addr().Interface()
+
+			// Recursively add the embedded struct's fields to the current level
+			reflectAndAddPropertiesWithDepth(embeddedStructInterface, properties, required, fmt.Sprintf("embedded-%s", field.Type.Name()), depth+1, visited)
+			continue // Skip normal field processing for embedded structs
+		}
+
+		// Handle anonymous pointer to struct fields
+		if field.Anonymous && field.Type.Kind() == reflect.Ptr && field.Type.Elem().Kind() == reflect.Struct {
+			if isDebugMode() {
+				log.Printf("Flattening embedded pointer to struct field: %s", field.Type.Elem().Name())
+			}
+			// Create a zero value instance of the embedded struct for reflection
+			embeddedStructValue := reflect.New(field.Type.Elem()).Elem()
+			embeddedStructInterface := embeddedStructValue.Addr().Interface()
+
+			// Recursively add the embedded struct's fields to the current level
+			reflectAndAddPropertiesWithDepth(embeddedStructInterface, properties, required, fmt.Sprintf("embedded-ptr-%s", field.Type.Elem().Name()), depth+1, visited)
+			continue // Skip normal field processing for embedded pointer structs
+		}
+
 		jsonTag := field.Tag.Get("json")
 		formTag := field.Tag.Get("form")             // Used for query params often
 		jsonschemaTag := field.Tag.Get("jsonschema") // Basic support
@@ -165,30 +285,9 @@ func reflectAndAddProperties(goType interface{}, properties map[string]*types.JS
 
 		propSchema := &types.JSONSchema{}
 
-		// Basic type mapping
-		switch field.Type.Kind() {
-		case reflect.String:
-			propSchema.Type = "string"
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			propSchema.Type = "integer"
-		case reflect.Float32, reflect.Float64:
-			propSchema.Type = "number"
-		case reflect.Bool:
-			propSchema.Type = "boolean"
-		case reflect.Slice, reflect.Array:
-			propSchema.Type = "array"
-			// TODO: Implement items schema based on element type
-			propSchema.Items = &types.JSONSchema{Type: "string"} // Placeholder
-		case reflect.Map:
-			propSchema.Type = "object"
-			// TODO: Implement properties schema based on map key/value types
-		case reflect.Struct:
-			propSchema.Type = "object"
-			// Potentially recurse, but keep simple for now
-		default:
-			propSchema.Type = "string" // Default fallback
-		}
+		// Handle the field type recursively
+		fieldType := field.Type
+		propSchema = generateSchemaForType(fieldType, depth+1, visited)
 
 		// Basic 'required' and 'description' handling from jsonschema tag
 		isRequired := false // Default to not required
@@ -213,4 +312,66 @@ func reflectAndAddProperties(goType interface{}, properties map[string]*types.JS
 			*required = append(*required, fieldName)
 		}
 	}
+}
+
+// generateSchemaForType generates JSON schema for a given reflect.Type
+func generateSchemaForType(fieldType reflect.Type, depth int, visited map[reflect.Type]bool) *types.JSONSchema {
+	propSchema := &types.JSONSchema{}
+
+	// Handle pointers by dereferencing them
+	if fieldType.Kind() == reflect.Ptr {
+		fieldType = fieldType.Elem()
+	}
+
+	// Basic type mapping
+	switch fieldType.Kind() {
+	case reflect.String:
+		propSchema.Type = "string"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		propSchema.Type = "integer"
+	case reflect.Float32, reflect.Float64:
+		propSchema.Type = "number"
+	case reflect.Bool:
+		propSchema.Type = "boolean"
+	case reflect.Slice, reflect.Array:
+		propSchema.Type = "array"
+		// Recursively handle the element type
+		elemType := fieldType.Elem()
+		propSchema.Items = generateSchemaForType(elemType, depth+1, visited)
+	case reflect.Map:
+		propSchema.Type = "object"
+		// For maps, we can optionally handle the value type
+		if fieldType.Key().Kind() == reflect.String {
+			// Only handle string-keyed maps for now
+			valueType := fieldType.Elem()
+			propSchema.AdditionalProperties = generateSchemaForType(valueType, depth+1, visited)
+		}
+	case reflect.Struct:
+		propSchema.Type = "object"
+		propSchema.Properties = make(map[string]*types.JSONSchema)
+		propSchema.Required = make([]string, 0)
+
+		// Create a zero value instance of the struct for reflection
+		structValue := reflect.New(fieldType).Elem()
+		structInterface := structValue.Addr().Interface()
+
+		// Recursively process the struct fields
+		reflectAndAddPropertiesWithDepth(structInterface, propSchema.Properties, &propSchema.Required, fmt.Sprintf("nested-%s", fieldType.Name()), depth, visited)
+	case reflect.Interface:
+		// For interfaces, we can't determine the exact type, so use a generic object
+		propSchema.Type = "object"
+		propSchema.Properties = make(map[string]*types.JSONSchema)
+		propSchema.Required = make([]string, 0)
+		// Recursively process the struct fields
+		reflectAndAddPropertiesWithDepth(reflect.New(fieldType).Elem(), propSchema.Properties, &propSchema.Required, fmt.Sprintf("nested-%s", fieldType.Name()), depth, visited)
+		propSchema.Description = fmt.Sprintf("Interface type: %s", fieldType.Name())
+	default:
+		propSchema.Type = "string" // Default fallback
+		if isDebugMode() {
+			log.Printf("Unknown type kind: %v, defaulting to string", fieldType.Kind())
+		}
+	}
+
+	return propSchema
 }
