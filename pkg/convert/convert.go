@@ -36,6 +36,7 @@ func ConvertRoutesToTools(routes gin.RoutesInfo, registeredSchemas map[string]ty
 		// Generate schema for the tool's input
 		inputSchema := generateInputSchema(route, registeredSchemas)
 		outputSchema := generateOutputSchema(route, registeredSchemas)
+		annotations := generateAnnotations(route)
 
 		// Create the tool definition
 		tool := types.Tool{
@@ -43,6 +44,7 @@ func ConvertRoutesToTools(routes gin.RoutesInfo, registeredSchemas map[string]ty
 			Description:  fmt.Sprintf("Handler for %s %s", route.Method, route.Path), // Use route info for description
 			InputSchema:  inputSchema,
 			OutputSchema: outputSchema,
+			Annotations:  annotations,
 		}
 
 		ttools = append(ttools, tool)
@@ -57,6 +59,20 @@ func ConvertRoutesToTools(routes gin.RoutesInfo, registeredSchemas map[string]ty
 	}
 
 	return ttools, operations
+}
+
+func generateAnnotations(route gin.RouteInfo) *types.Annotations {
+	if route.Method == "GET" {
+		return &types.Annotations{
+			ReadOnlyHint: true,
+		}
+	}
+	if route.Method == "DELETE" {
+		return &types.Annotations{
+			DestructiveHint: true,
+		}
+	}
+	return nil
 }
 
 // PathParamRegex is used to find path parameters like :id or *action

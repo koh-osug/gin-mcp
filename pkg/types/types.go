@@ -54,11 +54,17 @@ type MCPMessage struct {
 
 // Tool represents a function or capability exposed by the server
 type Tool struct {
-	Name         string      `json:"name"`                  // Unique identifier for the tool
-	Description  string      `json:"description,omitempty"` // Human-readable description
-	InputSchema  *JSONSchema `json:"inputSchema"`           // Schema for the tool's input parameters
-	OutputSchema *JSONSchema `json:"outputSchema"`          // Schema for the tool's output parameters
+	Name         string       `json:"name"`                  // Unique identifier for the tool
+	Description  string       `json:"description,omitempty"` // Human-readable description
+	InputSchema  *JSONSchema  `json:"inputSchema"`           // Schema for the tool's input parameters
+	OutputSchema *JSONSchema  `json:"outputSchema"`          // Schema for the tool's output parameters
+	Annotations  *Annotations `json:"annotations,omitempty"`
 	// Add other fields as needed by the MCP spec (e.g., outputSchema)
+}
+
+type Annotations struct {
+	ReadOnlyHint    bool `json:"readOnlyHint,omitempty"`
+	DestructiveHint bool `json:"destructiveHint,omitempty"`
 }
 
 // Operation represents the mapping from a tool name (operation ID) to its underlying HTTP endpoint
