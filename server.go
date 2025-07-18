@@ -93,7 +93,7 @@ func New(engine *gin.Engine, config *Config) *GinMCP {
 // RegisterSchema associates Go struct types with a specific route for automatic schema generation.
 // Provide nil if a type (Query or Body or Response) is not applicable for the route.
 // Example: mcp.RegisterSchema("POST", "/items", nil, main.Item{}, nil)
-func (m *GinMCP) RegisterSchema(method string, path string, queryType interface{}, bodyType interface{}, responseType interface{}) {
+func (m *GinMCP) RegisterSchema(method string, path string, description string, queryType interface{}, bodyType interface{}, responseType interface{}) {
 	m.schemasMu.Lock()
 	defer m.schemasMu.Unlock()
 
@@ -132,6 +132,7 @@ func (m *GinMCP) RegisterSchema(method string, path string, queryType interface{
 	}
 
 	m.registeredSchemas[schemaKey] = types.RegisteredSchemaInfo{
+		Description:  description,
 		QueryType:    queryType,
 		BodyType:     bodyType,
 		ResponseType: responseType,

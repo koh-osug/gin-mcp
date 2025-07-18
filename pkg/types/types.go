@@ -75,6 +75,7 @@ type Operation struct {
 
 // RegisteredSchemaInfo holds Go types associated with a specific route for schema generation
 type RegisteredSchemaInfo struct {
+	Description  string      // description of the function
 	QueryType    interface{} // Go struct or pointer to struct for query parameters (or nil)
 	BodyType     interface{} // Go struct or pointer to struct for request body (or nil)
 	ResponseType interface{} // Go struct or pointer to struct for response body (or nil)

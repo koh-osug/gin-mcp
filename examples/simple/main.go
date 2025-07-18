@@ -136,9 +136,9 @@ func configureMCP(r *gin.Engine) {
 	})
 
 	// Register request schemas for MCP
-	mcp.RegisterSchema("GET", "/products", ListProductsParams{}, nil)
-	mcp.RegisterSchema("POST", "/products", nil, Product{})
-	mcp.RegisterSchema("PUT", "/products/:id", nil, UpdateProductRequest{})
+	mcp.RegisterSchema("GET", "/products", "", ListProductsParams{}, nil)
+	mcp.RegisterSchema("POST", "/products", "", nil, Product{})
+	mcp.RegisterSchema("PUT", "/products/:id", "", nil, UpdateProductRequest{})
 
 	// Mount MCP endpoint
 	mcp.Mount("/mcp")

@@ -323,8 +323,8 @@ func TestRegisterSchema(t *testing.T) {
 	}
 
 	// Test valid registration
-	mcp.RegisterSchema("GET", "/items", QueryParams{}, nil, nil)
-	mcp.RegisterSchema("POST", "/items", nil, Body{}, nil)
+	mcp.RegisterSchema("GET", "/items", "", QueryParams{}, nil, nil)
+	mcp.RegisterSchema("POST", "/items", "", nil, Body{}, nil)
 
 	keyGet := "GET /items"
 	keyPost := "POST /items"
@@ -340,7 +340,7 @@ func TestRegisterSchema(t *testing.T) {
 	assert.Equal(t, reflect.TypeOf(Body{}), reflect.TypeOf(mcp.registeredSchemas[keyPost].BodyType))
 
 	// Test registration with pointer types
-	mcp.RegisterSchema("PUT", "/items/:id", &QueryParams{}, &Body{}, nil)
+	mcp.RegisterSchema("PUT", "/items/:id", "", &QueryParams{}, &Body{}, nil)
 	keyPut := "PUT /items/:id"
 	assert.Contains(t, mcp.registeredSchemas, keyPut)
 	assert.NotNil(t, mcp.registeredSchemas[keyPut].QueryType)
@@ -349,7 +349,7 @@ func TestRegisterSchema(t *testing.T) {
 	assert.Equal(t, reflect.TypeOf(&Body{}), reflect.TypeOf(mcp.registeredSchemas[keyPut].BodyType))
 
 	// Test overriding registration (should just update)
-	mcp.RegisterSchema("GET", "/items", nil, Body{}, nil) // Override GET /items
+	mcp.RegisterSchema("GET", "/items", "", nil, Body{}, nil) // Override GET /items
 	assert.Contains(t, mcp.registeredSchemas, keyGet)
 	assert.Nil(t, mcp.registeredSchemas[keyGet].QueryType)   // Should be nil now
 	assert.NotNil(t, mcp.registeredSchemas[keyGet].BodyType) // Should have body now

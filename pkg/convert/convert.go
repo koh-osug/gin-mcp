@@ -34,6 +34,11 @@ func ConvertRoutesToTools(routes gin.RoutesInfo, registeredSchemas map[string]ty
 		}
 
 		// Generate schema for the tool's input
+		schemaKey := route.Method + " " + route.Path
+		description := fmt.Sprintf("Handler for %s %s", route.Method, route.Path)
+		if registeredSchemaInfo, exists := registeredSchemas[schemaKey]; exists {
+			description = registeredSchemaInfo.Description
+		}
 		inputSchema := generateInputSchema(route, registeredSchemas)
 		outputSchema := generateOutputSchema(route, registeredSchemas)
 		annotations := generateAnnotations(route)
@@ -41,7 +46,7 @@ func ConvertRoutesToTools(routes gin.RoutesInfo, registeredSchemas map[string]ty
 		// Create the tool definition
 		tool := types.Tool{
 			Name:         operationID,
-			Description:  fmt.Sprintf("Handler for %s %s", route.Method, route.Path), // Use route info for description
+			Description:  description, // Use route info for description
 			InputSchema:  inputSchema,
 			OutputSchema: outputSchema,
 			Annotations:  annotations,
